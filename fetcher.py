@@ -28,7 +28,8 @@ class ContentFetcher:
         ranking_config: Optional[dict] = None,
         mab_limits: Optional[dict] = None,
         sync_client: PixivClient = None,
-        dynamic_threshold_config: Optional[dict] = None  # 动态阈值配置
+        dynamic_threshold_config: Optional[dict] = None,  # 动态阈值配置
+        search_limit: int = 50  # 默认搜索数量
     ):
         self.client = client  # 主客户端 (搜索、排行榜)
         self.sync_client = sync_client or client  # 同步客户端 (订阅、关注)
@@ -46,8 +47,12 @@ class ContentFetcher:
         
         # 动态阈值配置 (冷门标签保底)
         dt_cfg = dynamic_threshold_config or {}
+        dt_cfg = dynamic_threshold_config or {}
         self.dynamic_threshold_min = dt_cfg.get("min", 100)
         self.dynamic_threshold_rate = dt_cfg.get("rate", 0.05)
+        
+        # 搜索数量限制
+        self.search_limit = search_limit
 
         # 缓存 Tag 的最高热度，避免重复查询 (Session Valid)
         self._search_max_bookmarks_cache = {}
@@ -190,7 +195,7 @@ class ContentFetcher:
             tags=[final_q1, final_q2],
             bookmark_threshold=threshold,
             date_range_days=self.date_range_days,
-            limit=30
+            limit=self.search_limit
         )
 
     async def _search_single(self, tag: str, limit: int) -> list[Illust]:

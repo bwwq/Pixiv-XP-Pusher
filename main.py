@@ -509,7 +509,8 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
             subscribed_artists=list(manual_subs),
             discovery_rate=profiler_cfg.get("discovery_rate", 0.1),
             ranking_config=fetcher_cfg.get("ranking"),
-            dynamic_threshold_config=fetcher_cfg.get("dynamic_threshold")  # 动态阈值配置
+            dynamic_threshold_config=fetcher_cfg.get("dynamic_threshold"),  # 动态阈值配置
+            search_limit=fetcher_cfg.get("search_limit", 50)  # 搜索数量限制 (默认50)
         )
         
         # 执行 Discovery (Search + Ranking + Subs)

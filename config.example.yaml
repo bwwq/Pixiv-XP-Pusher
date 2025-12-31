@@ -95,6 +95,8 @@ fetcher:
     min: 100              # 保底收藏数 (无论多冷门的标签都至少要这么多收藏)
     rate: 0.05            # 相对热度比例 (取该标签最高收藏作品的 5%)
   
+  search_limit: 50        # 每次搜索获取的作品数量 (默认 50)
+  
   ranking:
     enabled: true
     modes: ["day", "week", "month"]
