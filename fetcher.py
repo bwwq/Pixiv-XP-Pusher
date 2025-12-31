@@ -27,7 +27,8 @@ class ContentFetcher:
         discovery_rate: float = 0.1,
         ranking_config: Optional[dict] = None,
         mab_limits: Optional[dict] = None,
-        sync_client: PixivClient = None  # 新增：同步专用客户端
+        sync_client: PixivClient = None,
+        dynamic_threshold_config: Optional[dict] = None  # 动态阈值配置
     ):
         self.client = client  # 主客户端 (搜索、排行榜)
         self.sync_client = sync_client or client  # 同步客户端 (订阅、关注)
@@ -42,6 +43,11 @@ class ContentFetcher:
         self.ranking_enabled = self.ranking_config.get("enabled", False)
         self.ranking_modes = self.ranking_config.get("modes", ["day"])
         self.ranking_limit = self.ranking_config.get("limit", 100)
+        
+        # 动态阈值配置 (冷门标签保底)
+        dt_cfg = dynamic_threshold_config or {}
+        self.dynamic_threshold_min = dt_cfg.get("min", 100)
+        self.dynamic_threshold_rate = dt_cfg.get("rate", 0.05)
 
         # 缓存 Tag 的最高热度，避免重复查询 (Session Valid)
         self._search_max_bookmarks_cache = {}
@@ -342,8 +348,8 @@ class ContentFetcher:
             # Save Cache
             self._search_max_bookmarks_cache[tag] = max_bookmarks
 
-        # 相对阈值：全站最高热度的 5% (最低 100)
-        relative_threshold = max(100, int(max_bookmarks * 0.05))
+        # 相对阈值：使用配置的比例和保底值
+        relative_threshold = max(self.dynamic_threshold_min, int(max_bookmarks * self.dynamic_threshold_rate))
         
         final_threshold = min(base, relative_threshold)
         # logger.debug(f"动态阈值 '{tag}': Max={max_bookmarks} -> Threshold={final_threshold} (Base={base})")

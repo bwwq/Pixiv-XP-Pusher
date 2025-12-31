@@ -667,6 +667,98 @@ class TelegramNotifier(BaseNotifier):
                 success = False
         return success
     
+    async def push_illusts(
+        self, 
+        illusts: list, 
+        message_prefix: str = "", 
+        reply_to_message_id: int | None = None
+    ) -> dict[int, int]:
+        """
+        推送作品列表（用于连锁推荐等场景）
+        
+        Args:
+            illusts: 作品列表
+            message_prefix: 消息前缀，会添加到 caption 开头
+            reply_to_message_id: 要回复的消息 ID（用于形成消息链）
+        
+        Returns:
+            dict[illust_id, message_id]: 成功发送的作品 ID 到消息 ID 的映射
+        """
+        if not illusts:
+            return {}
+        
+        result_map = {}  # illust_id -> message_id
+        
+        for illust in illusts:
+            try:
+                # 构建 caption
+                caption = self.format_message(illust)
+                if message_prefix:
+                    caption = f"{message_prefix}\n\n{caption}"
+                
+                keyboard = self._build_keyboard(illust.id)
+                topic_id = self._resolve_topic_id(illust)
+                
+                # 下载图片
+                image_data = None
+                if self.client and illust.image_urls:
+                    try:
+                        image_data = await self.client.download_image(illust.image_urls[0])
+                        if image_data:
+                            image_data = self._compress_image(image_data)
+                    except Exception as e:
+                        logger.warning(f"下载图片失败: {e}")
+                
+                # 发送到第一个 chat_id（通常连锁推送只发给触发者所在的 chat）
+                # 如果需要广播给所有 chat，可以改为遍历
+                chat_id = self.chat_ids[0] if self.chat_ids else None
+                if not chat_id:
+                    continue
+                
+                sent_message = None
+                try:
+                    if image_data:
+                        sent_message = await _retry_on_flood(lambda: self.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=BytesIO(image_data),
+                            caption=caption,
+                            reply_markup=keyboard,
+                            parse_mode="HTML",
+                            message_thread_id=topic_id,
+                            reply_to_message_id=reply_to_message_id,
+                            read_timeout=60,
+                            write_timeout=60
+                        ))
+                    else:
+                        from utils import get_pixiv_cat_url
+                        proxy_url = get_pixiv_cat_url(illust.id)
+                        sent_message = await _retry_on_flood(lambda: self.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=proxy_url,
+                            caption=caption,
+                            reply_markup=keyboard,
+                            parse_mode="HTML",
+                            message_thread_id=topic_id,
+                            reply_to_message_id=reply_to_message_id,
+                            read_timeout=60,
+                            write_timeout=60
+                        ))
+                    
+                    if sent_message:
+                        self._message_illust_map[sent_message.message_id] = illust.id
+                        result_map[illust.id] = sent_message.message_id
+                        logger.info(f"🔗 连锁推送成功: {illust.id} -> msg_id={sent_message.message_id}")
+                        
+                except Exception as e:
+                    logger.error(f"连锁推送到 {chat_id} 失败: {e}")
+                
+                await asyncio.sleep(1)  # 避免触发限流
+                
+            except Exception as e:
+                logger.error(f"处理连锁作品 {illust.id} 失败: {e}")
+        
+        return result_map
+    
     async def _send_single(self, illust: Illust) -> bool:
         """发送单个作品"""
         caption = self.format_message(illust)

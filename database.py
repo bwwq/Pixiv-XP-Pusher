@@ -33,6 +33,16 @@ async def init_db():
              # 旧表只有 tags，删除重建
              await db.execute("DROP TABLE IF EXISTS illust_cache")
              await db.commit()
+        
+        # 检查 illust_cache 表是否包含 chain_depth 列 (v3 新增 - 连锁深度)
+        try:
+             await db.execute("SELECT chain_depth FROM illust_cache LIMIT 0")
+        except Exception:
+             # 添加新列 (不重建表以保留数据)
+             await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_depth INTEGER DEFAULT 0")
+             await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_parent_id INTEGER DEFAULT NULL")
+             await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_msg_id INTEGER DEFAULT NULL")
+             await db.commit()
 
         await db.executescript("""
             -- 推送历史
@@ -381,12 +391,22 @@ async def mark_bookmark_scanned(illust_id: int):
 
 # ============ 作品缓存 ============
 
-async def cache_illust(illust_id: int, tags: list[str], user_id: int = 0, user_name: str = ""):
-    """缓存作品信息 (v2: 包含画师信息)"""
+async def cache_illust(
+    illust_id: int, 
+    tags: list[str], 
+    user_id: int = 0, 
+    user_name: str = "",
+    chain_depth: int = 0,
+    chain_parent_id: int = None,
+    chain_msg_id: int = None
+):
+    """缓存作品信息 (v3: 包含画师信息 + 连锁元数据)"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR REPLACE INTO illust_cache (illust_id, tags, user_id, user_name, created_at) VALUES (?, ?, ?, ?, ?)",
-            (illust_id, json.dumps(tags), user_id, user_name, datetime.now())
+            """INSERT OR REPLACE INTO illust_cache 
+               (illust_id, tags, user_id, user_name, chain_depth, chain_parent_id, chain_msg_id, created_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (illust_id, json.dumps(tags), user_id, user_name, chain_depth, chain_parent_id, chain_msg_id, datetime.now())
         )
         await db.commit()
 
@@ -407,10 +427,12 @@ async def get_cached_illust_tags(illust_id: int) -> list[str] | None:
 
 
 async def get_cached_illust(illust_id: int) -> dict | None:
-    """获取缓存的完整作品信息 (用于反馈处理)"""
+    """获取缓存的完整作品信息 (用于反馈处理, v3 含连锁信息)"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT illust_id, tags, user_id, user_name FROM illust_cache WHERE illust_id = ?", 
+            """SELECT illust_id, tags, user_id, user_name, 
+                      chain_depth, chain_parent_id, chain_msg_id 
+               FROM illust_cache WHERE illust_id = ?""", 
             (illust_id,)
         )
         row = await cursor.fetchone()
@@ -419,9 +441,39 @@ async def get_cached_illust(illust_id: int) -> dict | None:
                 "id": row[0],
                 "tags": json.loads(row[1]) if row[1] else [],
                 "user_id": row[2] or 0,
-                "user_name": row[3] or ""
+                "user_name": row[3] or "",
+                "chain_depth": row[4] or 0,
+                "chain_parent_id": row[5],
+                "chain_msg_id": row[6]
             }
         return None
+
+
+async def set_chain_meta(illust_id: int, chain_depth: int, chain_parent_id: int = None, chain_msg_id: int = None):
+    """设置作品的连锁元数据 (用于已缓存的作品)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """UPDATE illust_cache 
+               SET chain_depth = ?, chain_parent_id = ?, chain_msg_id = ?
+               WHERE illust_id = ?""",
+            (chain_depth, chain_parent_id, chain_msg_id, illust_id)
+        )
+        await db.commit()
+
+
+async def get_chain_meta(illust_id: int) -> tuple[int, int | None, int | None]:
+    """获取作品的连锁元数据
+    Returns: (chain_depth, chain_parent_id, chain_msg_id)
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT chain_depth, chain_parent_id, chain_msg_id FROM illust_cache WHERE illust_id = ?",
+            (illust_id,)
+        )
+        row = await cursor.fetchone()
+        if row:
+            return (row[0] or 0, row[1], row[2])
+        return (0, None, None)
 
 
 async def delete_cached_illust(illust_id: int):

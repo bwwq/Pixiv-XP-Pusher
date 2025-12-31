@@ -14,6 +14,13 @@ pixiv:
   # 您的 Pixiv 用户ID (自动获取，或手动指定)
   user_id: 0
 
+# 启用的功能策略
+strategies:
+  - xp_search     # 基于 XP 画像的每日搜索推荐
+  - related       # 连锁反应 (点赞后推送关联作品)
+  - ranking       # 每日排行榜推送
+  - subscription  # 关注画师的更新推送
+
 profiler:
   # AI 标签分析配置
   ai:
@@ -64,11 +71,11 @@ scheduler:
 
 filter:
   daily_limit: 20         # 每日推送上限
-  exclude_ai: true        # 过滤 AI 生成作品
+  exclude_ai: false        # 过滤 AI 生成作品
   max_per_artist: 3       # 单画师最多推送数
   artist_boost: 0.3       # 订阅画师加成
   min_create_days: 30     # 过滤 N 天前的作品
-  r18_mode: false         # 是否允许 R18 (需 Token 权限)
+  r18_mode: "mixed"       # 模式: mixed (混合), r18_only (纯R18), safe (仅全年龄). mixed=false, r18_only=true
 
   # 黑名单标签
   blacklist_tags:
@@ -82,6 +89,11 @@ fetcher:
   subscribed_artists: []  # 额外关注的画师 ID 列表
   
   date_range_days: 7      # 获取最近 N 天的作品
+  
+  # 动态阈值配置 (冷门标签搜索优化)
+  dynamic_threshold:
+    min: 100              # 保底收藏数 (无论多冷门的标签都至少要这么多收藏)
+    rate: 0.05            # 相对热度比例 (取该标签最高收藏作品的 5%)
   
   ranking:
     enabled: true
@@ -154,7 +166,7 @@ feedback:
   like_boost: 0.5             # 喜欢时权重增加量
   dislike_penalty: 0.3        # 不喜欢时权重减少量
   dislike_threshold: 3        # 累计不喜欢达到此次数时，提示建议屏蔽
-  max_chain_depth: 3          # 连锁反应最大连击次数
+  max_chain_depth: 3          # 单图连锁深度上限 (A→B→C共3层)
   related_push_limit: 1       # 每次反馈触发关联推送的数量
 
 network:

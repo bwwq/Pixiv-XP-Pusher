@@ -27,9 +27,6 @@ logger = logging.getLogger(__name__)
 # 全局运行锁，防止任务并发
 _task_lock = asyncio.Lock()
 
-# 全局链式反应追踪器 {user_id: {"count": 0, "last_time": timestamp}}
-_chain_tracker = {}
-
 async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfiler, sync_client: PixivClient = None):
     """创建并配置推送器（支持多推送渠道）"""
     # sync_client 用于 on_action 回调中的 main_task 调用
@@ -47,10 +44,17 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
     notifiers_list = []
     max_pages = notifier_cfg.get("max_pages", 10)
 
-    async def push_related_task(seed_illust, user_id):
-        """异步：推送关联作品"""
+    async def push_related_task(seed_illust, parent_msg_id: int = None, current_depth: int = 1):
+        """
+        异步：推送关联作品
+        
+        Args:
+            seed_illust: 触发连锁的作品
+            parent_msg_id: 父消息 ID（用于回复形成消息链）
+            current_depth: 当前连锁深度（从 1 开始）
+        """
         try:
-            logger.info(f"🔗 触发连锁反应: 正在获取 {seed_illust.id} 的关联作品...")
+            logger.info(f"🔗 触发连锁反应 (深度={current_depth}): 正在获取 {seed_illust.id} 的关联作品...")
             # 1. 获取关联
             related = await client.get_related_illusts(seed_illust.id, limit=20)
             if not related:
@@ -87,7 +91,6 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
                      if norm in xp_profile: score += xp_profile[norm]
                 
                 # Artist Boost
-                import database as db_mod
                 artist_score = await db_mod.get_artist_score(ill.user_id)
                 score += artist_score
                 
@@ -100,12 +103,36 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
             top_results = [x[0] for x in filtered[:push_limit]]
             
             if top_results:
+                # 构建消息前缀（包含源作品信息）
+                source_title = getattr(seed_illust, 'title', f'#{seed_illust.id}')
+                message_prefix = f"🔗 连锁推荐 (源自: {source_title})"
+                
                 logger.info(f"🔗 连锁推送: {len(top_results)} 个关联作品")
                 for n in notifiers_list:
-                    # 仅推送给触发的用户 (如果是 private feedback)
-                    # 目前 notify 接口通常是广播或指定 chat_id
-                    # 简单起见，广播给配置的 chat_ids (TelegramNotifier 会处理)
-                    await n.push_illusts(top_results, message_prefix="🔗 猜你喜欢 (及关联画师):")
+                    if hasattr(n, 'push_illusts'):
+                        # 使用 push_illusts 带回复功能
+                        sent_map = await n.push_illusts(
+                            top_results, 
+                            message_prefix=message_prefix,
+                            reply_to_message_id=parent_msg_id
+                        )
+                        
+                        # 缓存连锁作品信息（包含链深度）
+                        for ill in top_results:
+                            # 获取该作品对应的消息 ID
+                            msg_id = sent_map.get(ill.id)
+                            # 缓存作品信息 + 链元数据
+                            await db_mod.cache_illust(
+                                illust_id=ill.id,
+                                tags=ill.tags,
+                                user_id=ill.user_id,
+                                user_name=ill.user_name,
+                                chain_depth=current_depth,
+                                chain_parent_id=seed_illust.id,
+                                chain_msg_id=msg_id
+                            )
+                            # 记录推送来源
+                            await db_mod.mark_pushed(ill.id, 'related')
             else:
                 logger.info("🔗 关联作品过滤后为空")
 
@@ -185,25 +212,37 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
                      await update_strategy_stats(source, is_success=True)
                      logger.info(f"MAB策略 '{source}' 获得正反馈")
                 
-                 # === Chain Reaction Logic ===
+                 # === Chain Reaction Logic (Per-Image Depth) ===
                  if "related" in config.get("strategies", ["related"]):
-                     user_key = "global"
-                     now = datetime.now().timestamp()
-                     tracker = _chain_tracker.get(user_key, {"count": 0, "last_time": 0})
-                     
-                     if now - tracker["last_time"] > 300:
-                         tracker["count"] = 0
-                         
                      max_depth = config.get("feedback", {}).get("max_chain_depth", 3)
                      
-                     if tracker["count"] < max_depth:
-                         tracker["count"] += 1
-                         tracker["last_time"] = now
-                         _chain_tracker[user_key] = tracker
-                         
-                         asyncio.create_task(push_related_task(illust, 0))
+                     # 从缓存中获取当前作品的链深度和消息 ID
+                     chain_depth = cached.get("chain_depth", 0) if cached else 0
+                     chain_msg_id = cached.get("chain_msg_id") if cached else None
+                     
+                     # Fallback: 从 notifier 的消息映射中查找（用于非连锁推送的原图）
+                     if chain_msg_id is None:
+                         for n in notifiers_list:
+                             if hasattr(n, '_message_illust_map'):
+                                 # 反查：illust_id -> message_id
+                                 for msg_id, ill_id in n._message_illust_map.items():
+                                     if ill_id == illust_id:
+                                         chain_msg_id = msg_id
+                                         break
+                             if chain_msg_id:
+                                 break
+                     
+                     # 如果深度未超限，触发新一层连锁
+                     next_depth = chain_depth + 1
+                     if next_depth <= max_depth:
+                         logger.info(f"🔗 触发连锁 (当前深度={chain_depth}, 下一层={next_depth})")
+                         asyncio.create_task(push_related_task(
+                             illust, 
+                             parent_msg_id=chain_msg_id,
+                             current_depth=next_depth
+                         ))
                      else:
-                         logger.info("🔗 连锁反应达到上限，跳过")
+                         logger.info(f"🔗 作品 {illust_id} 连锁深度已达上限 ({chain_depth}/{max_depth})，跳过")
                      
              except Exception as e:
                  logger.error(f"同步收藏/连锁处理失败: {e}")
@@ -341,6 +380,9 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
             except Exception as e:
                 logger.error(f"OneBot 连接失败: {e}")
     
+    # 将创建的 notifiers 填充到 notifiers_list (供 push_related_task 等闭包使用)
+    notifiers_list.extend(notifiers)
+    
     return notifiers if notifiers else None
 
 
@@ -460,7 +502,8 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
             date_range_days=fetcher_cfg.get("date_range_days", 7),
             subscribed_artists=list(manual_subs),
             discovery_rate=profiler_cfg.get("discovery_rate", 0.1),
-            ranking_config=fetcher_cfg.get("ranking")
+            ranking_config=fetcher_cfg.get("ranking"),
+            dynamic_threshold_config=fetcher_cfg.get("dynamic_threshold")  # 动态阈值配置
         )
         
         # 执行 Discovery (Search + Ranking + Subs)
