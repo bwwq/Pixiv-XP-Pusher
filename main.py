@@ -79,7 +79,13 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
             xp_profile = await db_mod.get_xp_profile()
             
             for ill in related:
-                if ill.id == seed_illust.id: continue
+                # 严格去重 (ID 类型统一)
+                if int(ill.id) == int(seed_illust.id): continue
+
+                # 过滤已推送过的作品 (响应用户需求: 不推老图)
+                if await db_mod.is_pushed(ill.id):
+                    logger.debug(f"🔗 作品 {ill.id} 已推送过，跳过推荐")
+                    continue
                 # 检查屏蔽
                 if not c_filter.check_illust(ill): continue
                 if ill.user_id in profiler._blocked_artist_ids: continue
