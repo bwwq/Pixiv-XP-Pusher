@@ -926,6 +926,26 @@ def main():
         # Force once for test
         args.once = True
     
+    # 检查配置是否有效，无效则进入等待循环 (针对 Docker 环境)
+    if not config:
+        logger.warning("⚠️ 未找到有效配置，进入等待模式...")
+        logger.warning(f"请检查 {CONFIG_PATH} 是否存在且格式正确")
+        
+        import time
+        while not config:
+            try:
+                time.sleep(5)
+                # 尝试重新加载
+                new_config = load_config()
+                if new_config:
+                    config = new_config
+                    logger.info("✅ 检测到配置文件，继续启动...")
+                    break
+            except Exception:
+                pass
+            except (KeyboardInterrupt, SystemExit):
+                return
+    
     if args.once:
         asyncio.run(run_once(config))
     else:
