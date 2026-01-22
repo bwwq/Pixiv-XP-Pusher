@@ -164,6 +164,7 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
                                 tags=ill.tags,
                                 user_id=ill.user_id,
                                 user_name=ill.user_name,
+                                source='related',  # 连锁推送来源
                                 chain_depth=current_depth,
                                 chain_parent_id=seed_illust.id,
                                 chain_msg_id=msg_id
@@ -584,7 +585,24 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
         if scorer_cfg.get("enabled", False):
             try:
                 from ai_scorer import AIScorer
-                ai_scorer = AIScorer(scorer_cfg)
+                
+                # 支持复用 profiler.ai 的 API 配置
+                if scorer_cfg.get("use_profiler_api", True):
+                    profiler_ai_cfg = config.get("profiler", {}).get("ai", {})
+                    # 合并配置：scorer 优先，缺失的从 profiler.ai 继承
+                    merged_cfg = {
+                        "enabled": scorer_cfg.get("enabled", False),
+                        "provider": scorer_cfg.get("provider") or profiler_ai_cfg.get("provider", "openai"),
+                        "api_key": scorer_cfg.get("api_key") or profiler_ai_cfg.get("api_key", ""),
+                        "base_url": scorer_cfg.get("base_url") or profiler_ai_cfg.get("base_url", ""),
+                        "model": scorer_cfg.get("model") or profiler_ai_cfg.get("model", "gpt-4o-mini"),
+                        "max_candidates": scorer_cfg.get("max_candidates", 50),
+                        "score_weight": scorer_cfg.get("score_weight", 0.3),
+                    }
+                    ai_scorer = AIScorer(merged_cfg)
+                else:
+                    ai_scorer = AIScorer(scorer_cfg)
+                
                 if ai_scorer.enabled:
                     logger.info(f"已启用 AI 精排评分 (model={ai_scorer.model})")
             except Exception as e:
@@ -605,7 +623,10 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
             author_diversity=filter_cfg.get("author_diversity"),
             source_boost=filter_cfg.get("source_boost"),
             embedder=embedder,  # 可选的语义匹配
-            ai_scorer=ai_scorer  # 可选的 LLM 精排
+            ai_scorer=ai_scorer,  # 可选的 LLM 精排
+            # 多样性增强
+            shuffle_factor=filter_cfg.get("shuffle_factor", 0.0),
+            exploration_ratio=filter_cfg.get("exploration_ratio", 0.0)
         )
         
         pixiv_uid = config.get("pixiv", {}).get("user_id", 0)
@@ -640,6 +661,13 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
                             # 更新 MAB 策略统计 (Total Count)
                             if source in ['xp_search', 'subscription', 'ranking', 'related', 'engagement_artists']:
                                 await db_module.update_strategy_stats(source, is_success=False)
+                    
+                    # 将消息 ID 写入数据库缓存（用于连锁推送引用）
+                    for notifier in notifiers:
+                        if hasattr(notifier, '_message_illust_map'):
+                            for msg_id, illust_id in notifier._message_illust_map.items():
+                                if illust_id in all_sent_ids:
+                                    await db_module.set_chain_meta(illust_id, chain_depth=0, chain_msg_id=msg_id)
                             
                     logger.info(f"推送完成: {len(all_sent_ids)}/{len(filtered)} 个作品成功")
                 else:

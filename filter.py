@@ -111,7 +111,10 @@ class ContentFilter:
         author_diversity: Optional[dict] = None,  # 画师多样性衰减配置
         source_boost: Optional[dict] = None,  # 来源加成配置
         embedder = None,  # 可选的 Embedder 实例 (用于语义匹配)
-        ai_scorer = None  # 可选的 AIScorer 实例 (用于 LLM 精排)
+        ai_scorer = None,  # 可选的 AIScorer 实例 (用于 LLM 精排)
+        # 多样性增强
+        shuffle_factor: float = 0.0,  # 随机打散因子 (0-0.5)
+        exploration_ratio: float = 0.0  # 探索比例 (0-0.5)
     ):
         self.blacklist_tags = set(t.lower() for t in (blacklist_tags or []))
         self.daily_limit = daily_limit
@@ -144,6 +147,10 @@ class ContentFilter:
         
         # AI Scorer LLM 精排 (可选)
         self.ai_scorer = ai_scorer
+        
+        # 多样性增强
+        self.shuffle_factor = min(0.5, max(0.0, shuffle_factor))  # 限制在 0-0.5
+        self.exploration_ratio = min(0.5, max(0.0, exploration_ratio))
         
         # 硬性过滤Tag
         self.blacklist_tags.update({"r-18g", "guro", "gore"})
@@ -347,14 +354,20 @@ class ContentFilter:
                     source_multiplier = self.source_boost.get(source, 1.0)
                     scored_result.append((illust, tag_score * source_multiplier))
         
-        # 6. 综合排序：match_score * weight + normalized_bookmark * (1-weight)
+        # 6. 综合排序：match_score * weight + normalized_bookmark * (1-weight) + 随机打散
         if scored_result:
+            import random
             max_bookmark = max(item[0].bookmark_count for item in scored_result) or 1
             
             def sort_key(item):
                 illust, score = item
                 normalized_bookmark = illust.bookmark_count / max_bookmark
-                return score * self.match_weight + normalized_bookmark * (1 - self.match_weight)
+                base_score = score * self.match_weight + normalized_bookmark * (1 - self.match_weight)
+                # 随机打散：添加随机噪声使每次排序结果不同
+                if self.shuffle_factor > 0:
+                    noise = random.uniform(-self.shuffle_factor, self.shuffle_factor)
+                    return base_score + noise
+                return base_score
             
             scored_result.sort(key=sort_key, reverse=True)
         
@@ -418,8 +431,29 @@ class ContentFilter:
                 diverse_result.append(illust)
                 artist_count[illust.user_id] = count + 1
         
-        # 7. 每日上限
-        final_result = diverse_result[:self.daily_limit]
+        # 7. 探索比例：从后半部分随机抽取一些"潜力股"
+        if self.exploration_ratio > 0 and len(diverse_result) > self.daily_limit:
+            import random
+            explore_count = int(self.daily_limit * self.exploration_ratio)
+            main_count = self.daily_limit - explore_count
+            
+            # 前 main_count 个是高分作品
+            main_result = diverse_result[:main_count]
+            
+            # 从后半部分随机抽取 explore_count 个
+            candidate_pool = diverse_result[main_count:main_count * 3]  # 后续 2 倍候选
+            if len(candidate_pool) >= explore_count:
+                explore_picks = random.sample(candidate_pool, explore_count)
+            else:
+                explore_picks = candidate_pool
+            
+            # 混合并打散
+            final_result = main_result + explore_picks
+            random.shuffle(final_result)  # 打散顺序，避免探索推荐集中在末尾
+            logger.info(f"探索推荐: 混入 {len(explore_picks)} 个潜力作品")
+        else:
+            # 8. 每日上限
+            final_result = diverse_result[:self.daily_limit]
         
         # 记录匹配度日志
         if xp_profile and scored_result:

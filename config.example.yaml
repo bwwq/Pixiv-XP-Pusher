@@ -108,6 +108,10 @@ filter:
   min_create_days: 30 # 过滤 N 天前的作品
   r18_mode: "mixed" # 模式: mixed (混合), r18_only (纯R18), safe (仅全年龄). mixed=false, r18_only=true
 
+  # 多样性增强 (让每次推送都不太一样)
+  shuffle_factor: 0.15 # 随机打散因子 (0-0.5)，让排序结果每次不同
+  exploration_ratio: 0.2 # 探索比例，从候选池随机抽取 20% 的"潜力股"
+
   # 黑名单标签
   blacklist_tags:
     - "R-18G"
