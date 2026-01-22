@@ -34,6 +34,7 @@ class Illust:
     ai_type: int  # 0=非AI, 1=辅助AI, 2=纯AI
     create_date: datetime
     type: str = "illust" # illust, manga, ugoira
+    source: str = "xp_search"  # 来源策略 (用于归因)
 
 
 class PixivClient:

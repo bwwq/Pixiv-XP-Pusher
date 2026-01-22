@@ -74,6 +74,16 @@ ai:
     semantic_weight: 0.3 # 语义分数权重 (0-1, 与 Tag 分数加权)
     cache_ttl_days: 30 # Embedding 缓存天数
 
+  # AI 评分器 (LLM 精排，对候选作品进行二次评分)
+  scorer:
+    enabled: false # 是否启用
+    provider: openai # openai 或其他兼容 API
+    api_key: "" # 可复用 profiler.ai 的配置
+    base_url: "" # 留空使用 OpenAI 官方
+    model: gpt-4o-mini # 推荐轻量模型以降低成本
+    max_candidates: 50 # 候选超过此数量时跳过 AI 评分
+    score_weight: 0.3 # AI 分数权重 (用于与基础分数混合)
+
 scheduler:
   # 定时任务配置 (Cron 表达式: 分 时 日 月 周)
   # 示例: 每天中午 12:00 执行

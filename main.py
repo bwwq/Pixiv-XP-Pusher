@@ -578,6 +578,18 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
             except Exception as e:
                 logger.warning(f"Embedder 初始化失败: {e}")
         
+        # 初始化可选的 AIScorer (LLM 精排)
+        ai_scorer = None
+        scorer_cfg = ai_cfg.get("scorer", {})
+        if scorer_cfg.get("enabled", False):
+            try:
+                from ai_scorer import AIScorer
+                ai_scorer = AIScorer(scorer_cfg)
+                if ai_scorer.enabled:
+                    logger.info(f"已启用 AI 精排评分 (model={ai_scorer.model})")
+            except Exception as e:
+                logger.warning(f"AIScorer 初始化失败: {e}")
+        
         content_filter = ContentFilter(
             blacklist_tags=filter_cfg.get("blacklist_tags"),
             daily_limit=filter_cfg.get("daily_limit", 20),
@@ -592,7 +604,8 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
             # 新增：借鉴 X 算法的增强选项
             author_diversity=filter_cfg.get("author_diversity"),
             source_boost=filter_cfg.get("source_boost"),
-            embedder=embedder  # 可选的语义匹配
+            embedder=embedder,  # 可选的语义匹配
+            ai_scorer=ai_scorer  # 可选的 LLM 精排
         )
         
         pixiv_uid = config.get("pixiv", {}).get("user_id", 0)
@@ -602,9 +615,9 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
         # 4. 推送
         if notifiers and filtered:
             try:
-                # 缓存作品信息
+                # 缓存作品信息 (包含来源归因)
                 for illust in filtered:
-                    await cache_illust(illust.id, illust.tags, illust.user_id, illust.user_name)
+                    await cache_illust(illust.id, illust.tags, illust.user_id, illust.user_name, source=illust.source)
                 
                 all_sent_ids = set()
                 for notifier in notifiers:

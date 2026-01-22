@@ -197,6 +197,23 @@ async def init_db():
             );
         """)
         await db.commit()
+        
+        # === 迁移：为 illust_cache 添加 source 和 chain 列 ===
+        try:
+            await db.execute("ALTER TABLE illust_cache ADD COLUMN source TEXT DEFAULT 'xp_search'")
+            await db.commit()
+            logger.info("迁移：illust_cache 添加 source 列")
+        except:
+            pass  # 列已存在
+        
+        try:
+            await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_depth INTEGER DEFAULT 0")
+            await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_parent_id INTEGER")
+            await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_msg_id INTEGER")
+            await db.commit()
+            logger.info("迁移：illust_cache 添加 chain 列")
+        except:
+            pass  # 列已存在
 
 
 async def cleanup_old_records(days: int = 180):
@@ -307,6 +324,26 @@ async def is_pushed(illust_id: int) -> bool:
         return await cursor.fetchone() is not None
 
 
+async def get_pushed_ids_batch(illust_ids: list[int]) -> set[int]:
+    """
+    批量查询已推送的作品 ID 集合 (性能优化)
+    
+    将 O(n) 次数据库查询优化为 O(1) 次查询
+    """
+    if not illust_ids:
+        return set()
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        # 使用 IN 查询批量获取
+        placeholders = ",".join("?" * len(illust_ids))
+        cursor = await db.execute(
+            f"SELECT illust_id FROM push_history WHERE illust_id IN ({placeholders})",
+            illust_ids
+        )
+        rows = await cursor.fetchall()
+        return {row[0] for row in rows}
+
+
 async def mark_pushed(illust_id: int, source: str):
     """记录推送"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -414,6 +451,57 @@ async def record_feedback(illust_id: int, action: str):
         await db.commit()
 
 
+async def get_recent_liked_tags(limit: int = 10) -> list[str]:
+    """
+    获取近期喜欢的作品的标签 (用于 AI 评分)
+    
+    从 feedback 关联 illust_cache 获取标签
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            SELECT c.tags FROM feedback f
+            JOIN illust_cache c ON f.illust_id = c.illust_id
+            WHERE f.action = 'like'
+            ORDER BY f.created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = await cursor.fetchall()
+        
+        # 收集所有标签
+        all_tags = []
+        for row in rows:
+            try:
+                tags = json.loads(row[0])
+                all_tags.extend(tags[:5])  # 每个作品取前 5 个标签
+            except:
+                pass
+        return all_tags[:limit * 3]  # 返回适量标签
+
+
+async def get_recent_disliked_tags(limit: int = 10) -> list[str]:
+    """
+    获取近期不喜欢的作品的标签 (用于 AI 评分)
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            SELECT c.tags FROM feedback f
+            JOIN illust_cache c ON f.illust_id = c.illust_id
+            WHERE f.action = 'dislike'
+            ORDER BY f.created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = await cursor.fetchall()
+        
+        all_tags = []
+        for row in rows:
+            try:
+                tags = json.loads(row[0])
+                all_tags.extend(tags[:5])
+            except:
+                pass
+        return all_tags[:limit * 3]
+
+
 async def get_liked_illusts() -> set[int]:
     """获取所有被点赞的作品ID"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -474,19 +562,31 @@ async def cache_illust(
     tags: list[str], 
     user_id: int = 0, 
     user_name: str = "",
+    source: str = "xp_search",  # 新增：作品来源策略
     chain_depth: int = 0,
     chain_parent_id: int = None,
     chain_msg_id: int = None
 ):
-    """缓存作品信息 (v3: 包含画师信息 + 连锁元数据)"""
+    """缓存作品信息 (v4: 包含来源归因 + 连锁元数据)"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """INSERT OR REPLACE INTO illust_cache 
-               (illust_id, tags, user_id, user_name, chain_depth, chain_parent_id, chain_msg_id, created_at) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (illust_id, json.dumps(tags), user_id, user_name, chain_depth, chain_parent_id, chain_msg_id, datetime.now())
+               (illust_id, tags, user_id, user_name, source, chain_depth, chain_parent_id, chain_msg_id, created_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (illust_id, json.dumps(tags), user_id, user_name, source, chain_depth, chain_parent_id, chain_msg_id, datetime.now())
         )
         await db.commit()
+
+
+async def get_push_source(illust_id: int) -> str | None:
+    """获取作品的推送来源策略"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT source FROM illust_cache WHERE illust_id = ?",
+            (illust_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
 
 async def get_cached_illust_tags(illust_id: int) -> list[str] | None:

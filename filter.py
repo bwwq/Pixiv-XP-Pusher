@@ -110,7 +110,8 @@ class ContentFilter:
         # === 新增：借鉴 X 算法的增强选项 ===
         author_diversity: Optional[dict] = None,  # 画师多样性衰减配置
         source_boost: Optional[dict] = None,  # 来源加成配置
-        embedder = None  # 可选的 Embedder 实例 (用于语义匹配)
+        embedder = None,  # 可选的 Embedder 实例 (用于语义匹配)
+        ai_scorer = None  # 可选的 AIScorer 实例 (用于 LLM 精排)
     ):
         self.blacklist_tags = set(t.lower() for t in (blacklist_tags or []))
         self.daily_limit = daily_limit
@@ -140,6 +141,9 @@ class ContentFilter:
         
         # AI Embedding 语义匹配 (可选)
         self.embedder = embedder
+        
+        # AI Scorer LLM 精排 (可选)
+        self.ai_scorer = ai_scorer
         
         # 硬性过滤Tag
         self.blacklist_tags.update({"r-18g", "guro", "gore"})
@@ -172,12 +176,16 @@ class ContentFilter:
         if self.min_create_days > 0:
             time_threshold = datetime.now(illusts[0].create_date.tzinfo if illusts else None) - timedelta(days=self.min_create_days)
         
+        # 批量预加载已推送 ID (性能优化: O(n) -> O(1) 数据库查询)
+        all_ids = [illust.id for illust in illusts]
+        pushed_ids = await db.get_pushed_ids_batch(all_ids)
+        
         result = []
         filtered_by_time = 0
         
         for illust in illusts:
-            # 1. 去重
-            if await db.is_pushed(illust.id):
+            # 1. 去重 (使用预加载的集合)
+            if illust.id in pushed_ids:
                 continue
             
             # 2. 时间过滤
@@ -354,7 +362,34 @@ class ContentFilter:
         score_map = {item[0].id: item[1] for item in scored_result}
         sorted_illusts = [item[0] for item in scored_result]
         
-        # 6. 多样性控制：画师多样性衰减 + 硬性限制
+        # 6.1 AI 精排 (可选) - 使用 LLM 对候选作品进行二次评分
+        if self.ai_scorer and self.ai_scorer.enabled and xp_profile:
+            try:
+                candidates_for_ai = sorted_illusts[:self.ai_scorer.max_candidates]
+                if len(candidates_for_ai) > 5:  # 至少需要一定数量才有意义
+                    # 获取近期反馈
+                    recent_likes = await db.get_recent_liked_tags(limit=5)
+                    recent_dislikes = await db.get_recent_disliked_tags(limit=5)
+                    
+                    ai_scores = await self.ai_scorer.score_candidates(
+                        candidates_for_ai,
+                        xp_profile,
+                        recent_likes,
+                        recent_dislikes
+                    )
+                    
+                    if ai_scores:
+                        # 混合 AI 分数和基础分数
+                        score_map = self.ai_scorer.blend_scores(score_map, ai_scores)
+                        # 重新排序
+                        scored_result = [(ill, score_map.get(ill.id, 0)) for ill in sorted_illusts]
+                        scored_result.sort(key=lambda x: x[1], reverse=True)
+                        sorted_illusts = [item[0] for item in scored_result]
+                        logger.info("AI 精排已应用")
+            except Exception as e:
+                logger.warning(f"AI 精排失败: {e}")
+        
+        # 7. 多样性控制：画师多样性衰减 + 硬性限制
         # 借鉴 X 算法 AuthorDiversityScorer: 同一画师后续作品分数递减
         if self.diversity_enabled:
             # 应用画师多样性衰减
