@@ -34,16 +34,6 @@ async def init_db():
              await db.execute("DROP TABLE IF EXISTS illust_cache")
              await db.commit()
         
-        # 检查 illust_cache 表是否包含 chain_depth 列 (v3 新增 - 连锁深度)
-        try:
-             await db.execute("SELECT chain_depth FROM illust_cache LIMIT 0")
-        except Exception:
-             # 添加新列 (不重建表以保留数据)
-             await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_depth INTEGER DEFAULT 0")
-             await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_parent_id INTEGER DEFAULT NULL")
-             await db.execute("ALTER TABLE illust_cache ADD COLUMN chain_msg_id INTEGER DEFAULT NULL")
-             await db.commit()
-
         await db.executescript("""
             -- 推送历史
             CREATE TABLE IF NOT EXISTS push_history (
