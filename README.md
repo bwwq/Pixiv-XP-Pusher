@@ -30,7 +30,7 @@
   - 动态阈值（热门 Tag 需高收藏，冷门 Tag 宽容度高）
 - 📱 **多渠道推送** -
   - **Telegram**:
-    - 支持 MediaGroup 图集、直传图片（防防盗链/被墙）
+    - 支持 MediaGroup 图集、直传图片（防盗链/被墙）
     - **交互式菜单** [New!]: `/menu` 打开控制面板，按钮操作无需记指令
     - **Telegraph 批量模式** [New!]: 多图合并为 Telegraph 页面，界面简洁
     - **交互式指令**:
@@ -189,7 +189,7 @@ notifier:
 # 进阶配置 (可选)
 web:
   password: "" # 留空表示首次访问时设置
-  # 启动后访问 http://localhost:8080 查看管理面板
+  # 启动后访问 http://localhost:8000 查看管理面板
 ```
 
 ### 进阶配置项 [New!]
@@ -465,3 +465,37 @@ telegram:
 ## 📜 许可证
 
 MIT License
+
+---
+
+## 📝 更新日志 / Changelog
+
+### 2026-01-26
+
+**🐛 修复 / Bug Fixes**
+
+- **Docker 部署修复 / Docker Deployment Fix**
+  - 🇨🇳 修复 Docker 容器只启动主程序，未启动 Web UI 的问题。现在容器启动后会同时运行 Web UI (`uvicorn`) 和调度程序 (`main.py --now`)
+  - 🇺🇸 Fixed Docker container only starting the main program without the Web UI. Now the container runs both Web UI (`uvicorn`) and scheduler (`main.py --now`) simultaneously
+  - 🇨🇳 修复 `config.yaml` 挂载为只读导致首次设置密码失败的问题。已移除 `:ro` 只读限制
+  - 🇺🇸 Fixed `config.yaml` being mounted as read-only, causing password setup to fail. Removed `:ro` read-only restriction
+  - 🇨🇳 添加 `8000:8000` 端口映射，使 Web UI 可从外部访问
+  - 🇺🇸 Added `8000:8000` port mapping to make Web UI accessible externally
+
+**📖 文档更新 / Documentation**
+
+- 🇨🇳 更新 Docker 部署说明，明确首次启动需访问 `http://VPS_IP:8000` 设置密码
+- 🇺🇸 Updated Docker deployment instructions, clarifying that users need to visit `http://VPS_IP:8000` to set password on first launch
+
+**🔄 升级指南 / Upgrade Guide**
+
+```bash
+# 拉取更新 / Pull updates
+git pull
+
+# 重新构建并启动 / Rebuild and start
+docker-compose up -d --build
+
+# 访问 Web UI / Access Web UI
+# http://VPS_IP:8000
+```
