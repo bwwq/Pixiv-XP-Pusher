@@ -71,7 +71,10 @@ chmod +x deploy.sh
 ./deploy.sh logs
 ```
 
-- **初次启动**：容器会自动执行一次“Run Once”任务，然后进入定时调度模式。
+- **初次启动**：
+  - 容器会自动启动 **Web UI** 和 **调度程序**
+  - 访问 `http://VPS_IP:8000` 设置管理密码并完成初始化配置
+  - 首次执行一次 "Run Once" 任务，然后进入定时调度模式
 - **管理命令**：
   - `./deploy.sh stop` - 停止服务
   - `./deploy.sh once` - 手动触发一次推送

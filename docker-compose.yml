@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   pixiv-xp:
@@ -9,6 +9,8 @@ services:
       # 持久化数据和配置
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.yaml:/app/config.yaml # 去掉 :ro，允许 Web UI 写入配置
+    ports:
+      - "8000:8000" # 映射 Web UI 端口
     environment:
       - TZ=Asia/Shanghai
