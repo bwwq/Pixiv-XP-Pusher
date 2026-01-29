@@ -500,6 +500,14 @@ async def main_task(config: dict, client: PixivClient, profiler: XPProfiler, not
     
     async with _task_lock:
         logger.info("=== 开始推送任务 ===")
+        
+        # 刷新 Access Token (防止长时间运行后过期)
+        try:
+            await client.login()
+            if sync_client and sync_client is not client:
+                await sync_client.login()
+        except Exception as e:
+            logger.warning(f"Token 刷新失败: {e}")
     
     try:
         # 1. 构建/更新 XP 画像
