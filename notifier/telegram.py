@@ -1171,9 +1171,12 @@ class TelegramNotifier(BaseNotifier):
             logger.error(f"注册指令菜单失败: {e}")
         
         # 轮询级别的错误回调（非异步）
+        self._consecutive_errors = 0
+        
         def polling_error_callback(error):
             """处理轮询过程中的网络错误（updater 会自动重试）"""
-            logger.warning(f"Telegram 轮询网络错误 (将自动重试): {error}")
+            self._consecutive_errors += 1
+            logger.warning(f"Telegram 轮询网络错误 (第 {self._consecutive_errors} 次): {error}")
         
         # 启动轮询，配置更健壮的参数
         await self._app.updater.start_polling(
@@ -1183,6 +1186,48 @@ class TelegramNotifier(BaseNotifier):
             error_callback=polling_error_callback,  # 轮询错误回调
         )
         logger.info("Telegram Bot 轮询已启动（已配置自动重连）")
+        
+        # 启动健康检查后台任务
+        asyncio.create_task(self._polling_health_check())
+    
+    async def _polling_health_check(self):
+        """后台健康检查：监控轮询状态，自动重启"""
+        await asyncio.sleep(60)  # 启动后等待一分钟再开始检查
+        
+        while True:
+            try:
+                await asyncio.sleep(60)  # 每分钟检查一次
+                
+                if not self._app or not self._app.updater:
+                    logger.warning("Telegram 应用实例不存在，跳过健康检查")
+                    continue
+                
+                # 检查 updater 是否还在运行
+                if not self._app.updater.running:
+                    logger.error("🔄 检测到 Telegram 轮询已停止，正在尝试重启...")
+                    
+                    try:
+                        # 重新启动轮询
+                        await self._app.updater.start_polling(
+                            poll_interval=1.0,
+                            timeout=30,
+                            drop_pending_updates=True,
+                        )
+                        self._consecutive_errors = 0
+                        logger.info("✅ Telegram 轮询已成功重启")
+                    except Exception as e:
+                        logger.error(f"❌ 重启轮询失败: {e}")
+                else:
+                    # 轮询正常运行，重置错误计数
+                    if self._consecutive_errors > 0:
+                        logger.info(f"Telegram 轮询恢复正常 (之前累计 {self._consecutive_errors} 次错误)")
+                        self._consecutive_errors = 0
+                        
+            except asyncio.CancelledError:
+                logger.info("健康检查任务已取消")
+                break
+            except Exception as e:
+                logger.error(f"健康检查异常: {e}")
     
     async def stop_polling(self):
         """停止 Bot 轮询（用于健康检查重启）"""
