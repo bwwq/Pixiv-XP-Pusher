@@ -43,6 +43,7 @@
       - `/block` - 快速屏蔽讨厌的标签
       - `/block_artist` - 快速屏蔽画师 ID
   - **OneBot (QQ)**: 支持 Go-CQHTTP/Lagrange，链接卡片或图文消息，多图并发下载
+  - **AstrBot** [实验性]: 通过 HTTP API 接入 AstrBot 多平台框架，支持 QQ/微信/Telegram 等
 - ⚙️ **完全自动化**
   - 智能调度器，支持多时间点运行
   - **每日日报**: 每天生成 XP 变化报告与策略统计
@@ -344,6 +345,30 @@ notifier:
 ```
 
 OneBot 支持与 Telegram 相同的指令：`/push`, `/xp`, `/stats`, `/block`, `/unblock`, `/schedule`, `/help`
+
+#### 3.6 (可选) 配置 AstrBot [实验性]
+
+> ⚠️ **实验性功能**：AstrBot 渠道目前为实验性支持，API 接口可能随 AstrBot 版本更新而变化。
+
+如果您使用 [AstrBot](https://github.com/Soulter/AstrBot) 多平台机器人框架：
+
+**前置条件：**
+
+1. 已安装并运行 AstrBot
+2. 在 AstrBot 管理面板安装 `astrbot_plugin_http_adapter` 插件
+3. 获取目标会话的 `unified_msg_origin`（从 AstrBot 日志或管理面板获取）
+
+```yaml
+notifier:
+  types: [astrbot]
+
+  astrbot:
+    http_url: "http://127.0.0.1:6185" # HTTP API 地址
+    unified_msg_origin: "QQOfficial:group:123456" # 目标会话标识
+    api_key: "" # API 密钥（如需认证）
+```
+
+> **提示：** `unified_msg_origin` 格式通常为 `平台:类型:ID`，如 `QQOfficial:group:123456` 或 `Telegram:private:789`
 
 ---
 

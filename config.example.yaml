@@ -168,7 +168,7 @@ fetcher:
     max_quota: 0.6
 
 notifier:
-  # 启用的推送通道列表: telegram, onebot
+  # 启用的推送通道列表: telegram, onebot, astrbot
   types: [telegram]
 
   # 多图作品配置
@@ -216,6 +216,19 @@ notifier:
     push_to_private: true
     push_to_group: false
     master_id: 12345678 # 主人 QQ
+
+  # AstrBot (需安装 astrbot_plugin_http_adapter 插件)
+  astrbot:
+    # HTTP API 地址 (插件默认端口)
+    http_url: "http://127.0.0.1:6185"
+    # 目标会话标识 (从 AstrBot 管理面板获取)
+    # 格式: 平台:类型:ID, 如 QQOfficial:group:123456
+    unified_msg_origin: ""
+    # API 密钥 (如果插件启用了认证)
+    api_key: ""
+    # 图片压缩
+    image_quality: 85
+    max_image_size: 1500
 
 # 反馈与权重配置
 feedback:

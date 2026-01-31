@@ -423,6 +423,24 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
             except Exception as e:
                 logger.error(f"OneBot 连接失败: {e}")
     
+    if "astrbot" in notifier_types:
+        ab_cfg = notifier_cfg.get("astrbot", {})
+        if ab_cfg.get("http_url") and ab_cfg.get("unified_msg_origin"):
+            from notifier.astrbot import AstrBotNotifier
+            ab_notifier = AstrBotNotifier(
+                http_url=ab_cfg["http_url"],
+                unified_msg_origin=ab_cfg["unified_msg_origin"],
+                api_key=ab_cfg.get("api_key"),
+                on_feedback=on_feedback,
+                on_action=on_action,
+                client=client,
+                max_pages=max_pages,
+                image_quality=ab_cfg.get("image_quality", 85),
+                max_image_size=ab_cfg.get("max_image_size", 1500)
+            )
+            notifiers.append(ab_notifier)
+            logger.info("已启用 AstrBot 推送")
+    
     # 将创建的 notifiers 填充到 notifiers_list (供 push_related_task 等闭包使用)
     notifiers_list.extend(notifiers)
     
