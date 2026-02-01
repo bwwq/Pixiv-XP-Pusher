@@ -596,11 +596,17 @@ class TelegramNotifier(BaseNotifier):
                 await query.answer(f"❌ 无权限 (ID: {user_id})", show_alert=True)
                 return
             
+            # 检测回调是否过期（Telegram 限制回调查询必须在 48 秒内响应）
+            is_query_expired = False
             try:
                 await query.answer()
             except Exception as e:
-                # 忽略 "Query is too old" 等错误
-                pass
+                error_msg = str(e).lower()
+                is_query_expired = "query is too old" in error_msg or "too old" in error_msg
+                if is_query_expired:
+                    logger.warning(f"回调查询已过期 (用户 {user_id})，将使用消息回复方式确认")
+                else:
+                    logger.debug(f"回调应答失败: {e}")
             
             data = query.data
             
@@ -704,17 +710,36 @@ class TelegramNotifier(BaseNotifier):
                         await self.handle_feedback(int(illust_id), action)
                         
                         emoji = "❤️" if action == "like" else "👎"
+                        # 发送反馈确认消息
                         try:
-                            await query.edit_message_reply_markup(reply_markup=None)
+                            # 只有回调未过期时才尝试编辑消息按钮
+                            if not is_query_expired:
+                                await query.edit_message_reply_markup(reply_markup=None)
+                            # 无论回调是否过期都发送确认消息
                             await query.message.reply_text(f"{emoji} 已记录反馈")
                         except Exception as e:
-                            logger.debug(f"更新消息失败 (可忽略): {e}")
+                            # 编辑消息失败时，尝试直接发送消息确认
+                            logger.debug(f"更新消息失败: {e}")
+                            try:
+                                await self.bot.send_message(
+                                    chat_id=query.message.chat_id,
+                                    text=f"{emoji} 已记录反馈"
+                                )
+                            except Exception as e2:
+                                logger.warning(f"发送确认消息失败: {e2}")
                     except Exception as e:
                         logger.error(f"处理反馈失败 ({action} {illust_id}): {e}")
                         try:
                             await query.message.reply_text(f"❌ 处理失败: {e}")
                         except:
-                            pass
+                            # 最后尝试直接发送
+                            try:
+                                await self.bot.send_message(
+                                    chat_id=query.message.chat_id,
+                                    text=f"❌ 处理失败: {e}"
+                                )
+                            except:
+                                pass
         
         # 处理回复消息（1=喜欢, 2=不喜欢, 或输入内容）
         async def reply_handler(update, context):
