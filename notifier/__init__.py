@@ -3,5 +3,6 @@ from .base import BaseNotifier
 from .telegram import TelegramNotifier
 from .onebot import OneBotNotifier
 from .astrbot import AstrBotNotifier
+from .qwenpaw import QwenPawNotifier
 
-__all__ = ["BaseNotifier", "TelegramNotifier", "OneBotNotifier", "AstrBotNotifier"]
+__all__ = ["BaseNotifier", "TelegramNotifier", "OneBotNotifier", "AstrBotNotifier", "QwenPawNotifier"]

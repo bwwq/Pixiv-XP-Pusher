@@ -107,6 +107,7 @@ class ContentFilter:
         artist_boost: float = 0.3,  # 关注画师的匹配度加成
         min_create_days: int = 0,  # 过滤 N 天前的老图 (0=不过滤)
         r18_mode: bool = False,  # 涩涩模式：只推送 R-18
+        allowed_types: Optional[list[str]] = None,  # 允许的作品类型
         # === 新增：借鉴 X 算法的增强选项 ===
         author_diversity: Optional[dict] = None,  # 画师多样性衰减配置
         source_boost: Optional[dict] = None,  # 来源加成配置
@@ -126,7 +127,8 @@ class ContentFilter:
         self.artist_boost = artist_boost
         self.min_create_days = min_create_days
         self.r18_mode = r18_mode
-        
+        self.allowed_types = set(allowed_types or ["illust"])
+
         # 画师多样性衰减 (借鉴 X 算法 AuthorDiversityScorer)
         # 公式: multiplier(position) = (1.0 - floor) × decay^position + floor
         diversity_cfg = author_diversity or {}
@@ -199,7 +201,11 @@ class ContentFilter:
             if time_threshold and illust.create_date < time_threshold:
                 filtered_by_time += 1
                 continue
-            
+
+            # 2.5 作品类型过滤 (只保留允许的类型)
+            if illust.type not in self.allowed_types:
+                continue
+
             # 3. R-18G 排除
             if self._has_blacklisted_tag(illust):
                 continue
@@ -475,6 +481,10 @@ class ContentFilter:
             time_threshold = datetime.now(illust.create_date.tzinfo) - timedelta(days=self.min_create_days)
             if illust.create_date < time_threshold:
                 return False
+
+        # 2.5 作品类型过滤
+        if illust.type not in self.allowed_types:
+            return False
 
         # 3. R-18G / Blacklist
         if self._has_blacklisted_tag(illust):

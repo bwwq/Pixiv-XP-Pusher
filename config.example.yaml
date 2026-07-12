@@ -98,8 +98,7 @@ filter:
     min_threshold: 0.1 # 匹配度低于此分数的作品会被丢弃
     weight_in_sort: 0.6 # 排序时匹配度占的权重 (0.6表示匹配度占60%, 收藏数占40%)
 
-  daily_limit:
-    20 # 单次任务推送上限 (Per-Run Limit)
+  daily_limit: 20 # 单次任务推送上限 (Per-Run Limit)
     # 注意：此参数控制每次脚本运行时最多推送多少张
     # 如果您每小时运行一次，全天总量 = 24 * daily_limit
   exclude_ai: false # 过滤 AI 生成作品
@@ -235,6 +234,19 @@ notifier:
     # 图片压缩
     image_quality: 85
     max_image_size: 1500
+
+  # QwenPaw
+  qwenpaw:
+    # QwenPaw 二进制文件路径
+    qwenpaw_bin: "YOUR_QWENPAW_BIN_PATH"
+    # QwenPaw 任务 ID (唯一标识)
+    cronid: "YOUR_CRONID_HERE"
+    # 压缩图片阈值 (MB)
+    # 下载的图片大小超过此值时会自动压缩
+    max_image_size_mb: 9.9
+    # 是否保留历史记录
+    # 如果开启，程序会将推送记录保存到 data/push_data/history
+    keep_history: false
 
 # 反馈与权重配置
 feedback:
