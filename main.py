@@ -459,6 +459,7 @@ async def setup_notifiers(config: dict, client: PixivClient, profiler: XPProfile
             qp_notifier = QwenPawNotifier(
                 cronid=qp_cfg["cronid"],
                 keep_history=qp_cfg.get("keep_history", False),
+                on_feedback=on_feedback,
                 client=client,
                 max_pages=max_pages,
                 max_image_size_mb=qp_cfg.get("max_image_size_mb", 9.5),

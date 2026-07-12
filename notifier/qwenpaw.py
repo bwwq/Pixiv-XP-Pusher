@@ -29,6 +29,7 @@ class QwenPawNotifier(BaseNotifier):
         self,
         cronid: str,
         keep_history: bool = False,
+        on_feedback: Optional[callable] = None,
         client: Optional['PixivClient'] = None,
         max_pages: int = 10,
         max_image_size_mb: float = 9.5,
@@ -48,6 +49,7 @@ class QwenPawNotifier(BaseNotifier):
         # 相对于项目根目录的 data/ 目录
         _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.download_dir = os.path.join(_project_root, "data")
+        self.on_feedback = on_feedback
         self.keep_history = keep_history
         self.client = client
         self.max_pages = max_pages
@@ -481,3 +483,7 @@ class QwenPawNotifier(BaseNotifier):
         except Exception as e:
             logger.warning(f"send_text 失败: {e}")
             return False
+
+    def handle_feedback(self, illust_id: int, action: str) -> bool:
+        """QwenPaw 不需要使用反馈"""
+        return True
