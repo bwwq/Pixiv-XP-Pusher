@@ -2,7 +2,7 @@
 
 > 🎨 **智能 XP 捕获与推送系统**
 >
-> 基于用户收藏自动分析 XP（性癖/兴趣偏好）画像，全网搜索并智能推送最懂你的 Pixiv 插画。支持 Telegram / QQ (OneBot) 多渠道推送。
+> 基于用户收藏自动分析 XP（性癖/兴趣偏好）画像，全网搜索并智能推送最懂你的 Pixiv 插画。支持 Telegram / QQ (OneBot) / AstrBot / QwenPaw 多渠道推送。
 
 ---
 
@@ -44,6 +44,10 @@
       - `/block_artist` - 快速屏蔽画师 ID
   - **OneBot (QQ)**: 支持 Go-CQHTTP/Lagrange，链接卡片或图文消息，多图并发下载
   - **AstrBot** [实验性]: 通过 HTTP API 接入 AstrBot 多平台框架，支持 QQ/微信/Telegram 等
+  - **QwenPaw**: 通过 Agent 框架推送，支持两种协作方式
+    - **定时推送**: 下载作品图片 + 生成 MD 清单，通过 cron 任务触发 Agent 分发到指定的目标频道
+    - **自然语言交互 (NL Bridge)**: 通过 `nl_bridge.py` 脚本配合 `pixiv-nl-bridge.skill.md` 技能文档，Agent 可直接以自然语言搜索作品、查看排行榜、管理收藏、下载原图等
+    - **历史记录保存**: 支持将每次推送的图片和报告归档到历史目录，便于追溯
 - ⚙️ **完全自动化**
   - 智能调度器，支持多时间点运行
   - **每日日报**: 每天生成 XP 变化报告与策略统计
@@ -228,20 +232,28 @@ notifier:
 
 ```
 pixiv-xp/
-├── config.yaml          # 配置文件
-├── main.py              # 程序主入口 (调度/执行)
-├── launcher.py          # 交互式引导/管理菜单
-├── start.bat            # Windows 启动脚本
-├── deploy.sh            # Docker 管理脚本
-├── get_token.py         # Pixiv Token 获取工具
-├── requirements.txt     # Python 依赖
-├── docker-compose.yml   # Docker 编排
-├── pixiv_client.py      # Pixiv API 封装
-├── profiler.py          # XP 画像分析核心
-├── fetcher.py           # 内容搜索与抓取
-├── filter.py            # 过滤与去重逻辑
-├── database.py          # SQLite 数据存储
-└── notifier/            # 推送适配器 (Telegram, OneBot)
+├── config.yaml              # 配置文件
+├── main.py                  # 程序主入口 (调度/执行)
+├── launcher.py              # 交互式引导/管理菜单
+├── nl_bridge.py             # 交互桥接脚本
+├── pixiv-nl-bridge.skill.md # NL Bridge 技能文档（供 Agent 调用参考）
+├── start.bat                # Windows 启动脚本
+├── deploy.sh                # Docker 管理脚本
+├── get_token.py             # Pixiv Token 获取工具
+├── requirements.txt         # Python 依赖
+├── docker-compose.yml       # Docker 编排
+├── pixiv_client.py          # Pixiv API 封装
+├── profiler.py              # XP 画像分析核心
+├── fetcher.py               # 内容搜索与抓取
+├── filter.py                # 过滤与去重逻辑
+├── database.py              # SQLite 数据存储
+└── notifier/                # 推送适配器
+    ├── __init__.py
+    ├── base.py              # 推送器抽象基类
+    ├── telegram.py          # Telegram 推送
+    ├── onebot.py            # OneBot (QQ) 推送
+    ├── astrbot.py           # AstrBot 推送
+    └── qwenpaw.py           # QwenPaw 推送
 ```
 
 ---
@@ -414,6 +426,54 @@ notifier:
 
 > **提示：** `unified_msg_origin` 格式通常为 `平台:类型:ID`，如 `QQOfficial:group:123456` 或 `Telegram:private:789`
 
+#### 3.7 (可选) 配置 QwenPaw 推送
+
+> QwenPaw 是一个 Agent 框架，Pixiv-XP-Pusher 将作品图片下载到本地后生成 MD 推送清单，通过 cron 任务触发 Agent 读取清单并分发到目标通道（如 QQ 频道）。
+
+**前置条件：**
+
+1. 已安装并配置 [QwenPaw](https://github.com/agentscope-ai/QwenPaw)
+2. 创建好 cron 任务并获取对应的 `cronid`
+3. 确保 `qwenpaw` 可执行文件在 `PATH` 中（或指定 `qwenpaw_bin` 路径）
+
+**配置示例：**
+
+```yaml
+notifier:
+  types: [qwenpaw]
+
+  qwenpaw:
+    cronid: "your-cron-task-id"        # 你创建的任务ID，必填
+    keep_history: false                # 是否保留推送历史记录
+    max_pages: 10                      # 多图作品最大页数
+    max_image_size_mb: 9.5             # 图片最大大小 MB，超限自动压缩
+    qwenpaw_bin: "/path/to/qwenpaw"    # 可执行文件路径
+```
+
+QwenPaw 支持两种使用方式：
+
+**方式一：定时推送**
+
+推送触发后自动下载图片 → 生成 MD 推送清单 → 调用 `qwenpaw cron run <cronid>` 触发 Agent 读取清单并分发。
+
+> **注意：** 该 cron 任务的执行由 Pixiv-XP-Pusher 的调度器控制，因此在 QwenPaw 中创建任务时无需配置执行时间，需要将任务状态设为**禁用**（仅手动触发），避免与系统调度冲突。
+
+Cron 任务提示词示例（在 QwenPaw 中创建 cron 任务时使用）：
+
+```text
+读取 Pixiv-XP-Pusher/data/push_data/latest/push_report.md。
+先根据作品标签、画师、收藏数总结整体特点发送开场介绍。
+然后逐幅作品发送：先发送文字介绍，再发送对应图片。
+```
+
+**方式二：自然语言交互 (NL Bridge)**
+
+通过 `nl_bridge.py` 脚本配合 `pixiv-nl-bridge.skill.md` 技能文档，Agent 可直接以自然语言搜索作品、查看排行榜、管理收藏等，无需经过推送流程。详细命令参考技能文档。
+
+**历史记录：**
+
+启用 `keep_history: true` 后，每次推送时自动将 `latest/` 目录归档到 `data/push_data/history/YYYY-MM-DD/` 目录，按时间戳命名，便于追溯。
+
 ---
 
 ### Step 4: 配置 AI 清洗 (可选但推荐)
@@ -538,6 +598,28 @@ MIT License
 ---
 
 ## 📝 更新日志 / Changelog
+
+### 2026-07-12
+
+**✨ 新功能 / New Features**
+
+- **QwenPaw 推送通道**
+  - 🇨🇳 新增 QwenPaw Agent 推送通道，支持定时推送（图片下载 + MD 清单 + cron dispatch）和自然语言交互（NL Bridge）两种方式
+  - 🇺🇸 Added QwenPaw Agent push channel, supporting scheduled push (image download + MD report + cron dispatch) and natural language interaction (NL Bridge)
+  - 🇨🇳 新增 `nl_bridge.py` 脚本和 `pixiv-nl-bridge.skill.md` 技能文档，Agent 可直接通过自然语言搜索作品、查看排行榜、管理收藏等
+  - 🇺🇸 Added `nl_bridge.py` script and `pixiv-nl-bridge.skill.md` skill document, enabling Agent to search illustrations, view rankings, manage bookmarks etc. via natural language
+  - 🇨🇳 支持推送历史记录归档（`keep_history` 配置），每次推送自动备份到 `data/push_data/history/` 目录
+  - 🇺🇸 Added push history archiving (`keep_history` config), automatically backs up each push to `data/push_data/history/`
+
+**🐛 修复 / Bug Fixes**
+
+- 🇨🇳 修复 `QwenPawNotifier` 缺少 `handle_feedback` 抽象方法实现导致无法实例化的问题
+- 🇺🇸 Fixed `QwenPawNotifier` not implementing abstract method `handle_feedback`, which caused instantiation failure
+
+**📖 文档更新 / Documentation**
+
+- 🇨🇳 更新 README：新增 QwenPaw 推送配置说明、NL Bridge 使用指南、更新日志
+- 🇺🇸 Updated README: added QwenPaw push configuration guide, NL Bridge usage guide, changelog
 
 ### 2026-01-26
 

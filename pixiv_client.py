@@ -107,7 +107,8 @@ class PixivClient:
         stop_ids: Optional[set[int]] = None,
         skip_ids: Optional[set[int]] = None,
         on_batch: Optional[callable] = None,
-        start_url: Optional[str] = None
+        start_url: Optional[str] = None,
+        tag: Optional[str] = None
     ) -> list[Illust]:
         """
         获取用户收藏
@@ -120,6 +121,7 @@ class PixivClient:
             skip_ids: 遇到这些ID时跳过但继续（用于笨拙的断点续传）
             on_batch: 每批次回调 (items, next_url)
             start_url: 起始URL（用于高效断点续传）
+            tag: 按标签过滤
         """
         if private and not self._logged_in:
             logger.warning("获取私密收藏需要登录")
@@ -166,8 +168,10 @@ class PixivClient:
             for item in result["illusts"]:
                 try:
                     illust = self._parse_illust(item)
-                    
-                    # Logics
+
+                    if tag and tag not in illust.tags:
+                        continue
+
                     if stop_ids and illust.id in stop_ids:
                         stop_triggered = True
                         break
